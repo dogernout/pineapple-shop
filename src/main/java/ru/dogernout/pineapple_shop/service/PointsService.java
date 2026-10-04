@@ -143,6 +143,12 @@ public class PointsService {
     }
 
     @Transactional(readOnly = true)
+    public Purchase getPurchase(Long purchaseId) {
+        return purchaseRepository.findById(purchaseId)
+                .orElseThrow(() -> new EntityNotFoundException("Purchase", purchaseId));
+    }
+
+    @Transactional(readOnly = true)
     public List<Purchase> getPurchaseHistory(Long telegramId) {
         var user = userService.getByTelegramId(telegramId);
         return purchaseRepository.findByUserIdOrderByPurchasedAtDesc(user.getId());

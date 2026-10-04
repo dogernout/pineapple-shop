@@ -2,10 +2,12 @@ package ru.dogernout.pineapple_shop.bot.router;
 
 import lombok.RequiredArgsConstructor;
 import ru.dogernout.pineapple_shop.bot.conversation.ConversationManager;
+import ru.dogernout.pineapple_shop.bot.conversation.flow.AddItemFlow;
 import ru.dogernout.pineapple_shop.bot.conversation.flow.CreditPointsFlow;
+import ru.dogernout.pineapple_shop.bot.support.CallbackData;
 import ru.dogernout.pineapple_shop.bot.support.TelegramSender;
 import ru.dogernout.pineapple_shop.config.PineappleShopProperties;
-import ru.dogernout.pineapple_shop.domain.Item;
+import ru.dogernout.pineapple_shop.domain.Purchase;
 import ru.dogernout.pineapple_shop.domain.User;
 import ru.dogernout.pineapple_shop.domain.enums.PurchaseStatus;
 import ru.dogernout.pineapple_shop.domain.enums.Role;
@@ -14,7 +16,8 @@ import ru.dogernout.pineapple_shop.service.ItemService;
 import ru.dogernout.pineapple_shop.service.PointsService;
 import ru.dogernout.pineapple_shop.service.UserService;
 import com.pengrad.telegrambot.model.Message;
-import java.util.List;
+import com.pengrad.telegrambot.model.request.InlineKeyboardButton;
+import com.pengrad.telegrambot.model.request.InlineKeyboardMarkup;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Component;
 
@@ -30,6 +33,15 @@ import static ru.dogernout.pineapple_shop.bot.menu.MainMenuFactory.forRole;
 @Component
 @RequiredArgsConstructor
 public class MessageRouter {
+
+    private static final String TERMS_TEXT = """
+        Привет! 👋
+
+        При продолжении действий ты соглашаешься с правилами начисления и списания баллов. \
+        При отсутствии активности каждые 7 дней будут списываться по 100 баллов вплоть до обнуления счёта.
+
+        Чтобы внести предложения или оставить обратную связь, нужно написать личное сообщение \
+        пользователю @dogernout.""";
 
     private final UserService userService;
     private final PointsService pointsService;
@@ -65,12 +77,12 @@ public class MessageRouter {
 
         switch (text) {
             case BTN_BALANCE -> handleBalance(chatId, telegramUserId);
-            case BTN_EARN_REASONS, BTN_EARN_REASONS_ADMIN -> handleEarnReasons(chatId);
+            case BTN_EARN_REASONS, BTN_EARN_REASONS_ADMIN ->
+                    handleEarnReasons(chatId, user);
             case BTN_CATALOG -> handleCatalog(chatId);
             case BTN_CREDIT -> handleCreditStart(chatId, user);
+            case BTN_ADD_ITEM -> handleAddItemStart(chatId, user);
             case BTN_PURCHASE_HISTORY -> handlePurchaseHistory(chatId, user);
-            case BTN_ADD_ITEM ->
-                    sender.send(chatId, "Этот сценарий добавим следующим шагом — по образцу начисления баллов.");
             default -> sender.send(chatId, "Не понимаю эту команду — воспользуйся меню ниже.");
         }
     }
@@ -78,7 +90,7 @@ public class MessageRouter {
     private void handleStart(Long chatId, Long telegramUserId, String username) {
         var role = telegramUserId.equals(properties.getAdminTelegramId()) ? Role.ADMIN : Role.MEMBER;
         var user = userService.registerIfAbsent(telegramUserId, username, role);
-        sender.send(chatId, "Привет! 👋", forRole(user.getRole()));
+        sender.send(chatId, TERMS_TEXT, forRole(user.getRole()));
     }
 
     private void handleBalance(Long chatId, Long telegramUserId) {
@@ -86,22 +98,32 @@ public class MessageRouter {
         sender.send(chatId, "Твой баланс: 🎯 %d баллов".formatted(balance));
     }
 
-    private void handleEarnReasons(Long chatId) {
+    private void handleEarnReasons(Long chatId, User user) {
         var reasons = earnReasonService.listAvailable();
-        if (reasons.isEmpty()) {
-            sender.send(chatId, "Пока нет активных способов заработать баллы 🤷");
-            return;
-        }
-        var text = reasons.stream()
+
+        var text = reasons.isEmpty()
+                ?  "Пока нет активных способов заработать баллы 🤷"
+                : "Вот за что можно получить баллы:\n\n" + reasons.stream()
                 .map(r -> r.getPoints() == null
                         ? "• %s — по договорённости".formatted(r.getTitle())
                         : "• %s — %d баллов".formatted(r.getTitle(), r.getPoints()))
                 .collect(Collectors.joining("\n"));
-        sender.send(chatId, "Вот за что можно получить баллы:\n\n" + text);
+
+        if (!user.isAdmin()) {
+            sender.send(chatId, text);
+            return;
+        }
+
+        // Admin дополнительно видит кнопку добавления нового способа под списком.
+        var keyboard = new InlineKeyboardMarkup(
+                new InlineKeyboardButton("➕ Добавить способ")
+                        .callbackData(CallbackData.of(CallbackData.ADD_EARN_REASON_START))
+        );
+        sender.send(chatId, text, keyboard);
     }
 
     private void handleCatalog(Long chatId) {
-        List<Item> items = itemService.listAvailable();
+        var items = itemService.listAvailable();
         if (items.isEmpty()) {
             sender.send(chatId, "Пока нет доступных товаров 🤷");
             return;
@@ -119,6 +141,15 @@ public class MessageRouter {
                 chatId, user.getTelegramId(), member.getTelegramId(), sender, pointsService, conversationManager));
     }
 
+    private void handleAddItemStart(Long chatId, User user) {
+        if (!user.isAdmin()) {
+            sender.send(chatId, "Эта команда доступна только администратору.");
+            return;
+        }
+        conversationManager.start(chatId, new AddItemFlow(
+                chatId, user.getTelegramId(), sender, itemService, conversationManager));
+    }
+
     private void handlePurchaseHistory(Long chatId, User user) {
         if (!user.isAdmin()) {
             sender.send(chatId, "Эта команда доступна только администратору.");
@@ -130,12 +161,23 @@ public class MessageRouter {
             sender.send(chatId, "Покупок пока не было.");
             return;
         }
-        var text = purchases.stream()
-                .map(p -> "%s — %d баллов — %s %s".formatted(
-                        p.getItem().getTitle(), p.getPrice(), p.getPurchasedAt(),
-                        p.getStatus() == PurchaseStatus.REFUNDED
-                                ? "↩️ возвращено" : "✅"))
-                .collect(Collectors.joining("\n"));
-        sender.send(chatId, text);
+
+        // Каждая покупка — отдельное сообщение, т.к. у COMPLETED есть своя кнопка
+        // "Вернуть" с собственным purchaseId в callback_data.
+        for (Purchase purchase : purchases) {
+            var text = "%s — %d баллов — %s %s".formatted(
+                    purchase.getItem().getTitle(), purchase.getPrice(), purchase.getPurchasedAt(),
+                    purchase.getStatus() == PurchaseStatus.REFUNDED ? "↩️ возвращено" : "✅");
+
+            if (purchase.getStatus() == PurchaseStatus.COMPLETED) {
+                var keyboard = new InlineKeyboardMarkup(
+                        new InlineKeyboardButton("↩️ Вернуть")
+                                .callbackData(CallbackData.of(CallbackData.REFUND_START, purchase.getId()))
+                );
+                sender.send(chatId, text, keyboard);
+            } else {
+                sender.send(chatId, text);
+            }
+        }
     }
 }

@@ -18,8 +18,24 @@ public final class CallbackData {
     public static final String CONFIRM_BUY = "confirm_buy";
     public static final String BACK_TO_CATALOG = "back_to_catalog";
 
+    // Каталог (admin): управление конкретным товаром из карточки
+    public static final String RESTOCK_START = "restock_start";
+    public static final String DEACTIVATE_ITEM = "deactivate_item";
+    public static final String CONFIRM_DEACTIVATE = "confirm_deactivate";
+
     // Начисление баллов (admin)
     public static final String CONFIRM_CREDIT = "confirm_credit";
+
+    // Добавление товара (admin)
+    public static final String CONFIRM_ADD_ITEM = "confirm_add_item";
+
+    // Справочник "за что начисляют баллы" (admin)
+    public static final String ADD_EARN_REASON_START = "add_earn_reason_start";
+    public static final String CONFIRM_ADD_EARN_REASON = "confirm_add_earn_reason";
+
+    // Возврат покупки (admin)
+    public static final String REFUND_START = "refund_start";
+    public static final String CONFIRM_REFUND = "confirm_refund";
 
     // Общее для любого flow с подтверждением
     public static final String CANCEL = "cancel";
