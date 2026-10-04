@@ -1,3 +1,7 @@
 spring:
   application:
     name: pineapple-shop
+
+pineapple-shop:
+  token: ${BOT_TOKEN}
+  admin-telegram-id: ${ADMIN_TELEGRAM_ID}
