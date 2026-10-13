@@ -1,6 +1,10 @@
 package ru.dogernout.pineapple_shop.service;
 
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Slice;
+import org.springframework.data.domain.Sort;
 import ru.dogernout.pineapple_shop.domain.Item;
 import ru.dogernout.pineapple_shop.domain.PointTransaction;
 import ru.dogernout.pineapple_shop.domain.Purchase;
@@ -144,7 +148,7 @@ public class PointsService {
 
     @Transactional(readOnly = true)
     public Purchase getPurchase(Long purchaseId) {
-        return purchaseRepository.findById(purchaseId)
+        return purchaseRepository.findWithItemById(purchaseId)
                 .orElseThrow(() -> new EntityNotFoundException("Purchase", purchaseId));
     }
 
@@ -152,5 +156,23 @@ public class PointsService {
     public List<Purchase> getPurchaseHistory(Long telegramId) {
         var user = userService.getByTelegramId(telegramId);
         return purchaseRepository.findByUserIdOrderByPurchasedAtDesc(user.getId());
+    }
+
+    @Transactional(readOnly = true)
+    public TransactionHistoryPage getTransactionHistoryPage(Long adminTelegramId, Long memberTelegramId,
+                                                            int page, int size) {
+        userService.requireAdmin(adminTelegramId);
+        var member = userService.getByTelegramId(memberTelegramId);
+
+        var pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt", "id"));
+        var slice = transactionRepository.findByUserId(member.getId(), pageable);
+
+        var entries = slice.getContent().stream()
+                .map(tx -> new TransactionHistoryPage.Entry(
+                        tx.getCreatedAt(), tx.getType(), tx.getAmount(), tx.getComment(),
+                        tx.getPurchase() == null ? null : tx.getPurchase().getItem().getTitle()))
+                .toList();
+
+        return new TransactionHistoryPage(entries, page, slice.hasNext(), member.getBalance());
     }
 }

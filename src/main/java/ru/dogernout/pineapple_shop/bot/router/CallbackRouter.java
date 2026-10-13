@@ -3,12 +3,13 @@ package ru.dogernout.pineapple_shop.bot.router;
 import lombok.RequiredArgsConstructor;
 import ru.dogernout.pineapple_shop.bot.conversation.ConversationManager;
 import ru.dogernout.pineapple_shop.bot.conversation.flow.AddEarnReasonFlow;
+import ru.dogernout.pineapple_shop.bot.conversation.flow.EditEarnReasonFlow;
 import ru.dogernout.pineapple_shop.bot.conversation.flow.RefundFlow;
 import ru.dogernout.pineapple_shop.bot.conversation.flow.RestockFlow;
 import ru.dogernout.pineapple_shop.bot.support.CallbackData;
+import ru.dogernout.pineapple_shop.bot.support.MemberNotifier;
 import ru.dogernout.pineapple_shop.bot.support.TelegramSender;
 import ru.dogernout.pineapple_shop.domain.Item;
-import ru.dogernout.pineapple_shop.domain.Purchase;
 import ru.dogernout.pineapple_shop.domain.User;
 import ru.dogernout.pineapple_shop.exception.InsufficientBalanceException;
 import ru.dogernout.pineapple_shop.exception.OutOfStockException;
@@ -19,7 +20,7 @@ import ru.dogernout.pineapple_shop.service.UserService;
 import com.pengrad.telegrambot.model.CallbackQuery;
 import com.pengrad.telegrambot.model.request.InlineKeyboardButton;
 import com.pengrad.telegrambot.model.request.InlineKeyboardMarkup;
-import java.util.List;
+
 import java.util.Set;
 import org.springframework.stereotype.Component;
 
@@ -43,6 +44,7 @@ public class CallbackRouter {
     private final PointsService pointsService;
     private final ConversationManager conversationManager;
     private final TelegramSender sender;
+    private final MemberNotifier memberNotifier;
 
     public void route(CallbackQuery callbackQuery) {
         var chatId = callbackQuery.message().chat().id();
@@ -73,6 +75,19 @@ public class CallbackRouter {
             case CallbackData.ADD_EARN_REASON_START -> startAddEarnReason(chatId, telegramUserId);
             case CallbackData.REFUND_START ->
                     startRefund(chatId, telegramUserId, CallbackData.paramAsLong(data));
+            case CallbackData.EARN_REASON_SELECT ->
+                    showEarnReasonCard(chatId, messageId, CallbackData.paramAsLong(data));
+            case CallbackData.BACK_TO_EARN_REASONS -> showEarnReasonsList(chatId, messageId);
+            case CallbackData.EDIT_REASON_DESCRIPTION ->
+                    startEditReason(chatId, telegramUserId, CallbackData.paramAsLong(data), EditEarnReasonFlow.Field.DESCRIPTION);
+            case CallbackData.EDIT_REASON_POINTS ->
+                    startEditReason(chatId, telegramUserId, CallbackData.paramAsLong(data), EditEarnReasonFlow.Field.POINTS);
+            case CallbackData.DELETE_EARN_REASON ->
+                    confirmDeleteReason(chatId, messageId, CallbackData.paramAsLong(data));
+            case CallbackData.CONFIRM_DELETE_EARN_REASON ->
+                    handleDeleteReason(chatId, messageId, telegramUserId, CallbackData.paramAsLong(data));
+            case CallbackData.HISTORY_PAGE ->
+                    showPointsHistoryPage(chatId, messageId, telegramUserId, CallbackData.paramAsLong(data).intValue());
             default -> sender.send(chatId, "Эта кнопка больше не активна.");
         }
     }
@@ -180,13 +195,68 @@ public class CallbackRouter {
         // Триггер — inline-кнопка под списком способов заработка (MessageRouter),
         // а не reply-кнопка меню, поэтому flow стартует здесь, а не в MessageRouter.
         conversationManager.start(chatId, new AddEarnReasonFlow(
-                chatId, telegramUserId, sender, earnReasonService, conversationManager));
+                chatId, telegramUserId, sender, earnReasonService, conversationManager, memberNotifier));
     }
 
     // --- Возврат покупки (admin) ---
 
     private void startRefund(Long chatId, Long telegramUserId, Long purchaseId) {
-        conversationManager.start(chatId, new RefundFlow(
-                chatId, telegramUserId, purchaseId, sender, pointsService, conversationManager));
+        var memberTelegramId = userService.getTheMember().getTelegramId();
+        conversationManager.start(chatId, new RefundFlow(chatId, telegramUserId, purchaseId, sender, pointsService,
+                conversationManager, memberNotifier, memberTelegramId));
+    }
+
+    private void showEarnReasonsList(Long chatId, Integer messageId) {
+        var reasons = earnReasonService.listAvailable();
+        sender.edit(chatId, messageId, EarnReasonKeyboards.adminListHeader(reasons),
+                EarnReasonKeyboards.adminList(reasons));
+    }
+
+    private void showEarnReasonCard(Long chatId, Integer messageId, Long reasonId) {
+        var reason = earnReasonService.getById(reasonId);
+        var text = "%s\n%s\nБаллы: %s".formatted(
+                reason.getTitle(),
+                reason.getDescription() == null ? "—" : reason.getDescription(),
+                reason.getPoints() == null ? "по договорённости" : reason.getPoints().toString());
+
+        var keyboard = new InlineKeyboardMarkup();
+        keyboard.addRow(new InlineKeyboardButton("✏️ Описание")
+                .callbackData(CallbackData.of(CallbackData.EDIT_REASON_DESCRIPTION, reasonId)));
+        keyboard.addRow(new InlineKeyboardButton("💰 Баллы")
+                .callbackData(CallbackData.of(CallbackData.EDIT_REASON_POINTS, reasonId)));
+        keyboard.addRow(new InlineKeyboardButton("🗑 Удалить")
+                .callbackData(CallbackData.of(CallbackData.DELETE_EARN_REASON, reasonId)));
+        keyboard.addRow(new InlineKeyboardButton("⬅️ Назад")
+                .callbackData(CallbackData.of(CallbackData.BACK_TO_EARN_REASONS)));
+        sender.edit(chatId, messageId, text, keyboard);
+    }
+
+    private void startEditReason(Long chatId, Long telegramUserId, Long reasonId, EditEarnReasonFlow.Field field) {
+        var reason = earnReasonService.getById(reasonId);
+        conversationManager.start(chatId, new EditEarnReasonFlow(
+                chatId, telegramUserId, reasonId, reason.getTitle(), field, sender, earnReasonService, conversationManager));
+    }
+
+    private void confirmDeleteReason(Long chatId, Integer messageId, Long reasonId) {
+        var reason = earnReasonService.getById(reasonId);
+        var keyboard = new InlineKeyboardMarkup(
+                new InlineKeyboardButton("✅ Да")
+                        .callbackData(CallbackData.of(CallbackData.CONFIRM_DELETE_EARN_REASON, reasonId)),
+                new InlineKeyboardButton("❌ Нет")
+                        .callbackData(CallbackData.of(CallbackData.EARN_REASON_SELECT, reasonId))
+        );
+        sender.edit(chatId, messageId, "Удалить «%s»?".formatted(reason.getTitle()), keyboard);
+    }
+
+    private void handleDeleteReason(Long chatId, Integer messageId, Long telegramUserId, Long reasonId) {
+        earnReasonService.deactivate(telegramUserId, reasonId);
+        showEarnReasonsList(chatId, messageId); // сразу показываем обновлённый список
+    }
+
+    private void showPointsHistoryPage(Long chatId, Integer messageId, Long telegramUserId, int page) {
+        var member = userService.getTheMember();
+        var result = pointsService.getTransactionHistoryPage(
+                telegramUserId, member.getTelegramId(), page, PointsHistoryView.PAGE_SIZE);
+        sender.edit(chatId, messageId, PointsHistoryView.text(result), PointsHistoryView.keyboard(result));
     }
 }

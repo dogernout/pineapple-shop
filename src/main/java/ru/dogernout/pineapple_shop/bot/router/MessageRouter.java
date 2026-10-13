@@ -4,9 +4,12 @@ import lombok.RequiredArgsConstructor;
 import ru.dogernout.pineapple_shop.bot.conversation.ConversationManager;
 import ru.dogernout.pineapple_shop.bot.conversation.flow.AddItemFlow;
 import ru.dogernout.pineapple_shop.bot.conversation.flow.CreditPointsFlow;
+import ru.dogernout.pineapple_shop.bot.menu.MainMenuFactory;
 import ru.dogernout.pineapple_shop.bot.support.CallbackData;
+import ru.dogernout.pineapple_shop.bot.support.MemberNotifier;
 import ru.dogernout.pineapple_shop.bot.support.TelegramSender;
 import ru.dogernout.pineapple_shop.config.PineappleShopProperties;
+import ru.dogernout.pineapple_shop.domain.EarnReason;
 import ru.dogernout.pineapple_shop.domain.Purchase;
 import ru.dogernout.pineapple_shop.domain.User;
 import ru.dogernout.pineapple_shop.domain.enums.PurchaseStatus;
@@ -18,17 +21,12 @@ import ru.dogernout.pineapple_shop.service.UserService;
 import com.pengrad.telegrambot.model.Message;
 import com.pengrad.telegrambot.model.request.InlineKeyboardButton;
 import com.pengrad.telegrambot.model.request.InlineKeyboardMarkup;
+
+import java.util.List;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Component;
 
-import static ru.dogernout.pineapple_shop.bot.menu.MainMenuFactory.BTN_ADD_ITEM;
-import static ru.dogernout.pineapple_shop.bot.menu.MainMenuFactory.BTN_BALANCE;
-import static ru.dogernout.pineapple_shop.bot.menu.MainMenuFactory.BTN_CATALOG;
-import static ru.dogernout.pineapple_shop.bot.menu.MainMenuFactory.BTN_CREDIT;
-import static ru.dogernout.pineapple_shop.bot.menu.MainMenuFactory.BTN_EARN_REASONS;
-import static ru.dogernout.pineapple_shop.bot.menu.MainMenuFactory.BTN_EARN_REASONS_ADMIN;
-import static ru.dogernout.pineapple_shop.bot.menu.MainMenuFactory.BTN_PURCHASE_HISTORY;
-import static ru.dogernout.pineapple_shop.bot.menu.MainMenuFactory.forRole;
+import static ru.dogernout.pineapple_shop.bot.menu.MainMenuFactory.*;
 
 @Component
 @RequiredArgsConstructor
@@ -50,6 +48,7 @@ public class MessageRouter {
     private final ConversationManager conversationManager;
     private final TelegramSender sender;
     private final PineappleShopProperties properties;
+    private final MemberNotifier memberNotifier;
 
     public void route(Message message) {
         var text = message.text();
@@ -62,15 +61,19 @@ public class MessageRouter {
         var telegramUserId = message.from().id();
 
         if ("/start".equals(text)) {
+            conversationManager.finish(chatId);   // /start тоже прерывает сценарий
             handleStart(chatId, telegramUserId, message.from().username());
             return;
         }
 
-        // Если у chatId открыт сценарий — текст уходит в него, а не в меню.
         if (conversationManager.hasActive(chatId)) {
-            var finalText = text;
-            conversationManager.get(chatId).ifPresent(flow -> flow.onTextInput(finalText));
-            return;
+            if (MainMenuFactory.isMenuButton(text)) {
+                conversationManager.finish(chatId);   // выход из сценария, дальше пойдёт как обычная кнопка меню
+            } else {
+                var finalText = text;
+                conversationManager.get(chatId).ifPresent(flow -> flow.onTextInput(finalText));
+                return;
+            }
         }
 
         var user = userService.getByTelegramId(telegramUserId);
@@ -83,6 +86,7 @@ public class MessageRouter {
             case BTN_CREDIT -> handleCreditStart(chatId, user);
             case BTN_ADD_ITEM -> handleAddItemStart(chatId, user);
             case BTN_PURCHASE_HISTORY -> handlePurchaseHistory(chatId, user);
+            case BTN_POINTS_HISTORY -> handlePointsHistory(chatId, user);
             default -> sender.send(chatId, "Не понимаю эту команду — воспользуйся меню ниже.");
         }
     }
@@ -99,27 +103,20 @@ public class MessageRouter {
     }
 
     private void handleEarnReasons(Long chatId, User user) {
-        var reasons = earnReasonService.listAvailable();
+        List<EarnReason> reasons = earnReasonService.listAvailable();
 
-        var text = reasons.isEmpty()
-                ?  "Пока нет активных способов заработать баллы 🤷"
-                : "Вот за что можно получить баллы:\n\n" + reasons.stream()
-                .map(r -> r.getPoints() == null
-                        ? "• %s — по договорённости".formatted(r.getTitle())
-                        : "• %s — %d баллов".formatted(r.getTitle(), r.getPoints()))
-                .collect(Collectors.joining("\n"));
-
-        if (!user.isAdmin()) {
-            sender.send(chatId, text);
+        if (user.isAdmin()) {
+            sender.send(chatId, EarnReasonKeyboards.adminListHeader(reasons),
+                    EarnReasonKeyboards.adminList(reasons));
             return;
         }
 
-        // Admin дополнительно видит кнопку добавления нового способа под списком.
-        var keyboard = new InlineKeyboardMarkup(
-                new InlineKeyboardButton("➕ Добавить способ")
-                        .callbackData(CallbackData.of(CallbackData.ADD_EARN_REASON_START))
-        );
-        sender.send(chatId, text, keyboard);
+        var text = reasons.isEmpty()
+                ? "Пока нет активных способов заработать баллы 🤷"
+                : "Вот за что можно получить баллы:\n\n" + reasons.stream()
+                .map(this::formatReasonForMember)
+                .collect(Collectors.joining("\n\n"));
+        sender.send(chatId, text);
     }
 
     private void handleCatalog(Long chatId) {
@@ -137,8 +134,8 @@ public class MessageRouter {
             return;
         }
         var member = userService.getTheMember();
-        conversationManager.start(chatId, new CreditPointsFlow(
-                chatId, user.getTelegramId(), member.getTelegramId(), sender, pointsService, conversationManager));
+        conversationManager.start(chatId, new CreditPointsFlow(chatId, user.getTelegramId(), member.getTelegramId(),
+                sender, pointsService, conversationManager, memberNotifier));
     }
 
     private void handleAddItemStart(Long chatId, User user) {
@@ -147,7 +144,7 @@ public class MessageRouter {
             return;
         }
         conversationManager.start(chatId, new AddItemFlow(
-                chatId, user.getTelegramId(), sender, itemService, conversationManager));
+                chatId, user.getTelegramId(), sender, itemService, conversationManager, memberNotifier));
     }
 
     private void handlePurchaseHistory(Long chatId, User user) {
@@ -179,5 +176,32 @@ public class MessageRouter {
                 sender.send(chatId, text);
             }
         }
+    }
+
+    private void handlePointsHistory(Long chatId, User user) {
+        if (!user.isAdmin()) {
+            sender.send(chatId, "Эта команда доступна только администратору.");
+            return;
+        }
+        var member = userService.getTheMember();
+        var page = pointsService.getTransactionHistoryPage(
+                user.getTelegramId(), member.getTelegramId(), 0, PointsHistoryView.PAGE_SIZE);
+
+        var keyboard = PointsHistoryView.keyboard(page);
+        if (keyboard == null) {
+            sender.send(chatId, PointsHistoryView.text(page));
+        } else {
+            sender.send(chatId, PointsHistoryView.text(page), keyboard);
+        }
+    }
+
+    private String formatReasonForMember(EarnReason r) {
+        var header = r.getPoints() == null
+                ? "• %s — по договорённости".formatted(r.getTitle())
+                : "• %s — %d баллов".formatted(r.getTitle(), r.getPoints());
+
+        return r.getDescription() == null || r.getDescription().isBlank()
+                ? header
+                : header + "\n" + r.getDescription();
     }
 }

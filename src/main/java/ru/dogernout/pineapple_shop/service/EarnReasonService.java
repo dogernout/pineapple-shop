@@ -43,5 +43,32 @@ public class EarnReasonService {
         reason.deactivate();
     }
 
+    @Transactional(readOnly = true)
+    public EarnReason getById(Long reasonId) {
+        return earnReasonRepository.findById(reasonId)
+                .orElseThrow(() -> new EntityNotFoundException("EarnReason", reasonId));
+    }
+
+    @Transactional
+    public EarnReason updateDescription(Long adminTelegramId, Long reasonId, String description) {
+        userService.requireAdmin(adminTelegramId);
+        EarnReason reason = earnReasonRepository.findById(reasonId)
+                .orElseThrow(() -> new EntityNotFoundException("EarnReason", reasonId));
+        reason.changeDescription(description);
+        return reason;
+    }
+
+    @Transactional
+    public EarnReason updatePoints(Long adminTelegramId, Long reasonId, Integer points) {
+        if (points != null && points <= 0) {
+            throw new IllegalArgumentException("Points must be positive when specified");
+        }
+        userService.requireAdmin(adminTelegramId);
+        var reason = earnReasonRepository.findById(reasonId)
+                .orElseThrow(() -> new EntityNotFoundException("EarnReason", reasonId));
+        reason.changePoints(points);
+        return reason;
+    }
+
     // TODO: add activate ?
 }

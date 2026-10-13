@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import ru.dogernout.pineapple_shop.bot.conversation.ConversationFlow;
 import ru.dogernout.pineapple_shop.bot.conversation.ConversationManager;
 import ru.dogernout.pineapple_shop.bot.support.CallbackData;
+import ru.dogernout.pineapple_shop.bot.support.MemberNotifier;
 import ru.dogernout.pineapple_shop.bot.support.TelegramSender;
 import ru.dogernout.pineapple_shop.service.EarnReasonService;
 import com.pengrad.telegrambot.model.request.InlineKeyboardButton;
@@ -19,6 +20,7 @@ public class AddEarnReasonFlow implements ConversationFlow {
     private final TelegramSender sender;
     private final EarnReasonService earnReasonService;
     private final ConversationManager conversationManager;
+    private final MemberNotifier notifier;
 
     private Step step = Step.TITLE;
     private String title;
@@ -98,6 +100,7 @@ public class AddEarnReasonFlow implements ConversationFlow {
         try {
             earnReasonService.addReason(adminTelegramId, title, description, points);
             sender.send(chatId, "✅ Добавлено в справочник.");
+            notifier.newEarnReasonAdded(title, description, points);
         } finally {
             conversationManager.finish(chatId);
         }

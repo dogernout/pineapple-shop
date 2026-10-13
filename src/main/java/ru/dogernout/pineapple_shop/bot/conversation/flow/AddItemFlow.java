@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import ru.dogernout.pineapple_shop.bot.conversation.ConversationFlow;
 import ru.dogernout.pineapple_shop.bot.conversation.ConversationManager;
 import ru.dogernout.pineapple_shop.bot.support.CallbackData;
+import ru.dogernout.pineapple_shop.bot.support.MemberNotifier;
 import ru.dogernout.pineapple_shop.bot.support.TelegramSender;
 import ru.dogernout.pineapple_shop.service.ItemService;
 import com.pengrad.telegrambot.model.request.InlineKeyboardButton;
@@ -19,6 +20,7 @@ public class AddItemFlow implements ConversationFlow {
     private final TelegramSender sender;
     private final ItemService itemService;
     private final ConversationManager conversationManager;
+    private final MemberNotifier notifier;
 
     private Step step = Step.TITLE;
     private String title;
@@ -104,6 +106,7 @@ public class AddItemFlow implements ConversationFlow {
         try {
             itemService.addItem(adminTelegramId, title, description, price, quantity);
             sender.send(chatId, "✅ Товар «%s» добавлен в каталог.".formatted(title));
+            notifier.newItemAdded(title, description, price, quantity);
         } finally {
             conversationManager.finish(chatId);
         }

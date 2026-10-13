@@ -61,4 +61,11 @@ public class EarnReason {
         this.active = false;
     }
 
+    public void changeDescription(String description) {
+        this.description = description;
+    }
+
+    public void changePoints(Integer points) {
+        this.points = points;
+    }
 }

@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import ru.dogernout.pineapple_shop.bot.conversation.ConversationFlow;
 import ru.dogernout.pineapple_shop.bot.conversation.ConversationManager;
 import ru.dogernout.pineapple_shop.bot.support.CallbackData;
+import ru.dogernout.pineapple_shop.bot.support.MemberNotifier;
 import ru.dogernout.pineapple_shop.bot.support.TelegramSender;
 import ru.dogernout.pineapple_shop.service.PointsService;
 import com.pengrad.telegrambot.model.request.InlineKeyboardButton;
@@ -20,6 +21,7 @@ public class CreditPointsFlow implements ConversationFlow {
     private final TelegramSender sender;
     private final PointsService pointsService;
     private final ConversationManager conversationManager;
+    private final MemberNotifier notifier;
 
     private Step step = Step.AMOUNT;
     private Integer amount;
@@ -83,6 +85,7 @@ public class CreditPointsFlow implements ConversationFlow {
             // она не отражает bulk-update, см. комментарий в начале PointsService.
             int freshBalance = pointsService.getBalance(memberTelegramId);
             sender.send(chatId, "✅ Начислено %d баллов.\nБаланс: %d".formatted(amount, freshBalance));
+            notifier.pointsCredited(memberTelegramId, amount, comment, freshBalance);  // Нотификация пользователю
         } finally {
             conversationManager.finish(chatId);
         }

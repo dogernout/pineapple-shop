@@ -33,12 +33,23 @@ public final class CallbackData {
     public static final String ADD_EARN_REASON_START = "add_earn_reason_start";
     public static final String CONFIRM_ADD_EARN_REASON = "confirm_add_earn_reason";
 
+    // Редактирование справочника "за что начисляют баллы" (admin)
+    public static final String EARN_REASON_SELECT = "earn_reason";
+    public static final String BACK_TO_EARN_REASONS = "back_to_reasons";
+    public static final String EDIT_REASON_DESCRIPTION = "edit_reason_desc";
+    public static final String EDIT_REASON_POINTS = "edit_reason_points";
+    public static final String DELETE_EARN_REASON = "delete_reason";
+    public static final String CONFIRM_DELETE_EARN_REASON = "confirm_delete_reason";
+
     // Возврат покупки (admin)
     public static final String REFUND_START = "refund_start";
     public static final String CONFIRM_REFUND = "confirm_refund";
 
     // Общее для любого flow с подтверждением
     public static final String CANCEL = "cancel";
+
+    // Постраничная история баллов (admin)
+    public static final String HISTORY_PAGE = "tx_page";
 
     public static String of(String action) {
         return action;

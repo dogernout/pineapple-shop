@@ -51,6 +51,13 @@ public class UserService {
     }
 
     @Transactional(readOnly = true)
+    public Optional<User> findTheMember() {
+        return userRepository.findAll().stream()
+                .filter(u -> u.getRole() == Role.MEMBER)
+                .findFirst();
+    }
+
+    @Transactional(readOnly = true)
     public User requireAdmin(Long telegramId) {
         User user = getByTelegramId(telegramId);
         if (!user.isAdmin()) {
