@@ -11,11 +11,17 @@ spring:
     open-in-view: false
     hibernate:
       ddl-auto: none
-    show-sql: true
+    show-sql: false
     properties:
       hibernate:
-        format_sql: true
+        format_sql: false
 
 pineapple-shop:
   token: ${BOT_TOKEN}
   admin-telegram-id: ${ADMIN_TELEGRAM_ID}
+
+logging:
+  level:
+    org.hibernate:
+      SQL: DEBUG
+#      orm.jdbc.bind: TRACE

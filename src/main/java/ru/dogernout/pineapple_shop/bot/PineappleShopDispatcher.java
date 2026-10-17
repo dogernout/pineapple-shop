@@ -32,6 +32,9 @@ public class PineappleShopDispatcher {
     private final TelegramSender sender;
 
     public void dispatch(Update update) {
+        long startedAt = System.currentTimeMillis();
+        log.info("Incoming update {}: {}", update.updateId(), describe(update));
+
         var chatId = extractChatId(update);
         try {
             if (update.message() != null) {
@@ -40,6 +43,7 @@ public class PineappleShopDispatcher {
                 callbackRouter.route(update.callbackQuery());
             }
         } catch (DomainException e) {
+            log.warn("Domain error on update {}: {}", update.updateId(), e.getMessage());
             if (chatId != null) {
                 sender.send(chatId, "⚠️ " + humanize(e));
             }
@@ -48,7 +52,20 @@ public class PineappleShopDispatcher {
             if (chatId != null) {
                 sender.send(chatId, "Что-то пошло не так, попробуй ещё раз.");
             }
+        } finally {
+            log.info("Update {} handled in {} ms", update.updateId(), System.currentTimeMillis() - startedAt);
         }
+    }
+
+    private String describe(Update update) {
+        if (update.message() != null) {
+            return "message from=%d text=%s".formatted(update.message().from().id(), update.message().text());
+        }
+        if (update.callbackQuery() != null) {
+            return "callback from=%d data=%s".formatted(
+                    update.callbackQuery().from().id(), update.callbackQuery().data());
+        }
+        return "other update type";
     }
 
     private Long extractChatId(Update update) {
