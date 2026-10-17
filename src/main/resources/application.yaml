@@ -6,6 +6,15 @@ spring:
     username: ${POSTGRES_USER}
     password: ${POSTGRES_PASSWORD}
     driver-class-name: org.postgresql.Driver
+    hikari:
+      pool-name: pineapple-db-hikari
+      maximum-pool-size: 3
+      minimum-idle: 1
+      connection-timeout: 10000
+      validation-timeout: 3000
+      keepalive-time: 300000
+      max-lifetime: 600000
+      idle-timeout: 300000
 
   jpa:
     open-in-view: false
